@@ -1,0 +1,107 @@
+---
+title: "Final Project"
+author: "Rafael Condé, Felipe Pombal & Jose Maldonado"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+===== Load libraries =====
+```{r}
+library(quantmod)
+library(dplyr)
+library(lubridate)
+library(tm)
+library(slam)
+library(wordcloud)
+library(syuzhet)
+library(ggplot2)
+```
+
+
+===== Load & Read Data =====
+```{r}
+# Get tweet data 
+tweet_data <- read.csv("Data/Nvidia-Tweets.csv")
+tweet_data <- na.omit(tweet_data)  # Remove NA values
+
+# Remove duplicate tweets based on text
+tweet_data <- tweet_data %>%
+  distinct(Text, .keep_all = TRUE)
+
+# Format date column
+tweet_data$Day <- as.Date(tweet_data$Datetime)
+tweet_data$Time <- format(as.POSIXct(tweet_data$Datetime), "%H:%M:%S")
+tweet_data$Hour <- hour(ymd_hms(tweet_data$Datetime))
+
+
+# Get stock price data 
+start <- min(tweet_data$Day)
+end <- max(tweet_data$Day)
+nvda_data <- getSymbols("NVDA", from = start, to = end, auto.assign = F)
+
+nvda_data$LogReturn <- dailyReturn(nvda_data, type = "log")
+nvda_data$AReturn <- dailyReturn(nvda_data, type = "arithmetic")
+nvda_data <- as.data.frame(nvda_data)
+nvda_data$Date <- as.Date(rownames(nvda_data))
+
+```
+
+
+
+===== Text Analysis/ Mining ====
+
+Text pre-processing
+```{r}
+ # Convert the data to appropriate format
+corpus <- VCorpus(VectorSource(tweet_data[1:2000, ]$Text))
+
+# Clean data
+stop_words <- stopwords("en")
+corpus <- tm_map(corpus, content_transformer(function(x) removeWords(x, stop_words)))  # Remove stop words
+corpus <- tm_map(corpus, content_transformer(tolower)) # Lowercase
+corpus <- tm_map(corpus, removeNumbers)                # Remove numbers
+corpus <- tm_map(corpus, removePunctuation)            # Remove punctuation
+corpus <- tm_map(corpus, stripWhitespace)              # Remove extra whitespace
+```
+
+Explore corpus
+```{r}
+tdm <- TermDocumentMatrix(corpus)
+tdm_matrix <- as.matrix(tdm)
+word_freq <- rowSums(tdm_matrix)
+word_freq <- sort(word_freq, decreasing = TRUE)
+
+# Top words
+head(word_freq, 20)
+
+# Optional: Wordcloud
+wordcloud(names(word_freq), word_freq, max.words = 100)
+```
+
+Sentiment Analysis
+```{r}
+# Give a score to each tweet
+#tweet_data$Sentiment <- get_sentiment(tweet_data$Text, method = "afinn")
+
+sentiment_score <- tweet_data %>%
+  group_by(Day) %>%
+  summarize(MeanSentiment = mean(Sentiment))
+
+# Merge text mining data and stock data
+merged_data <- merge(nvda_data, sentiment_score, by.x = "Date", by.y = "Day", all.x = TRUE)
+merged_data$LaggedSentiment <- lag(merged_data$MeanSentiment, 1)
+
+ggplot() +
+  geom_line(data = sentiment_score, aes(x = Day, y = MeanSentiment)) +
+  geom_line(data = nvda_data, aes(x = Date, y = LogReturn))
+
+cor(merged_data$MeanSentiment, merged_data$LogReturn)
+
+lm_model <- lm(formula = LogReturns ~ MeanSentiment, data = merged_data)
+summary(lm_model)
+plot(lm_model)
+
+```
+
+
+
