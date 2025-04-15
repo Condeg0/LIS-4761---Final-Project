@@ -15,6 +15,8 @@ library(slam)
 library(wordcloud)
 library(syuzhet)
 library(ggplot2)
+library(lmtest)
+library(ggcorrplot)
 ```
 
 
@@ -82,16 +84,46 @@ tweet_data$Sentiment <- get_sentiment(tweet_data$Text, method = "afinn")
 
 # Get sentiment score and tweet volume
 df <- tweet_data %>%
+  mutate(SentimentType = case_when(
+    Sentiment > 0 ~ "positive",
+    Sentiment < 0 ~ "negative",
+    TRUE ~ "neutral"
+  )) %>%
   group_by(Day) %>%
-  summarize(MeanSentiment = mean(Sentiment),
-            TweetVolume = n())
+  summarize(
+    MeanSentiment = mean(Sentiment),
+    TweetVolume = n(),
+    Positive = sum(SentimentType == "positive"),
+    Negative = sum(SentimentType == "negative"),
+    Neutral = sum(SentimentType == "neutral"),
+    NegPosRatio = ifelse(Positive > 0, Negative / Positive, NA),
+    PosRatio = ifelse(Positive > 0, Positive / TweetVolume, NA),
+    NegRatio = ifelse(Negative > 0, Negative / TweetVolume, NA)) 
 
 # Merge text mining data and stock data
 merged_data <- merge(x = nvda_data, y = df, by.x = "Date", by.y = "Day", all.y = T)
 
-# Compute lagged values
-merged_data$LaggedSentiment <- dplyr::lag(merged_data$MeanSentiment, 1)
-merged_data$LaggedTVolume <- dplyr::lag(merged_data$TweetVolume, 1)
+merged_data <- merged_data %>%
+  mutate(
+    LaggedSentiment = lag(MeanSentiment, 1),
+    Volatility = abs(AReturn),  # absolute return as proxy
+    LaggedAReturn = lag(AReturn, 1),
+    LaggedVolatility = lag(Volatility, 1),
+    LaggedNVDA_Volume = lag(NVDA.Volume, 1),
+    LaggedTVolume = lag(TweetVolume, 1)
+  )
+
+# Select only numeric columns you care about
+cor_data <- merged_data %>%
+  select(
+    AReturn, Volatility, MeanSentiment, LaggedSentiment, TweetVolume,
+    LaggedTVolume, NVDA.Volume, LaggedNVDA_Volume, LaggedAReturn,
+    LaggedVolatility) %>%
+  na.omit()
+
+
+# Compute correlation matrix
+cor_matrix <- cor(cor_data)
 
 # Analyze correlation between variables
 # Average sentiment and return
@@ -112,7 +144,12 @@ cor(merged_data$TweetVolume, merged_data$AReturn, use = "complete.obs")
 cor(merged_data$LaggedTVolume, abs(merged_data$AReturn), use = "complete.obs")  # 1 lag
 cor(merged_data$LaggedTVolume, merged_data$AReturn, use = "complete.obs")  # 1 lag
 
+write.csv(x = merged_data, file = "Data/merged_data.csv")
 
+```
+
+Visualization
+```{r}
 # Plots 
 # Lagged Mean sentiment and Return
 ggplot(data = na.omit(merged_data), aes(x = Date)) +
@@ -124,12 +161,25 @@ ggplot(data = na.omit(merged_data), aes(x = Date)) +
   geom_line(aes(y = TweetVolume)) +
   geom_line(aes(y = NVDA.Volume))
 
+# Visualize correlations
+ggcorrplot(cor_matrix, 
+           method = "circle", 
+           type = "lower", 
+           lab = TRUE, 
+           tl.cex = 10,
+           colors = c("darkred", "white", "darkblue"),
+           title = "Correlation Matrix of Sentiment, Volume & Returns")
+
+
 # Linear models
+# Return and lagged mean sentiment
 lm_model <- lm(formula = AReturn ~ LaggedSentiment, data = merged_data)
+summary(lm_model)
+plot(lm_model)
+
+# Trading volume and Tweet Volume
 lm_model_volume <- lm(formula = NVDA.Volume ~ TweetVolume, data = merged_data)
 summary(lm_model_volume)
 plot(lm_model_volume)
-summary(lm_model)
-plot(lm_model)
 
 ```
