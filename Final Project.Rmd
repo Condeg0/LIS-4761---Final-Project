@@ -125,25 +125,6 @@ cor_data <- merged_data %>%
 # Compute correlation matrix
 cor_matrix <- cor(cor_data)
 
-# Analyze correlation between variables
-# Average sentiment and return
-cor(merged_data$LaggedSentiment, merged_data$AReturn, use = "complete.obs")  # 1 lag
-cor(merged_data$MeanSentiment, merged_data$AReturn, use = "complete.obs")
-
-# Average sentiment, volume and volatility 
-cor(merged_data$LaggedSentiment, merged_data$NVDA.Volume, use = "complete.obs")  # 1 lag
-cor(merged_data$TweetVolume, merged_data$AReturn, use = "complete.obs") 
-cor(merged_data$TweetVolume, abs(merged_data$AReturn), use = "complete.obs") # Vol
-
-# Tweet volume and trading volume
-cor(merged_data$TweetVolume, merged_data$NVDA.Volume, use = "complete.obs")
-cor(merged_data$LaggedTVolume, merged_data$NVDA.Volume, use = "complete.obs")  # 1 lag
-
-# Tweet volume, Return and volatility
-cor(merged_data$TweetVolume, merged_data$AReturn, use = "complete.obs")
-cor(merged_data$LaggedTVolume, abs(merged_data$AReturn), use = "complete.obs")  # 1 lag
-cor(merged_data$LaggedTVolume, merged_data$AReturn, use = "complete.obs")  # 1 lag
-
 write.csv(x = merged_data, file = "Data/merged_data.csv")
 
 ```
