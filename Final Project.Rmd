@@ -1,9 +1,10 @@
 ---
-title: "Final Project"
-author: "Rafael Condé"
+title: "Final Project Deliverable"
+author: "Anthony Nance, Rafael Condé Gomes, Matthew Humphreys, Travis Race, James Angeles"
 date: "`r Sys.Date()`"
 output: html_document
 ---
+
 
 ===== Load libraries =====
 ```{r}
@@ -17,6 +18,9 @@ library(syuzhet)
 library(ggplot2)
 library(lmtest)
 library(ggcorrplot)
+library(quanteda)
+library(e1071)
+library(caret)
 ```
 
 
@@ -52,35 +56,29 @@ nvda_data$Date <- as.Date(rownames(nvda_data))
 
 ===== Text Analysis/ Mining ====
 
-Text pre-processing
+Text processing & text mining
 ```{r}
- # Convert the data to appropriate format
-corpus <- VCorpus(VectorSource(tweet_data[1:6000, ]$Text))
+# Remove unecessary columns from tweet data
+tweet_data <- tweet_data[ , c("Text", "Day")]
 
-# Clean data
-stop_words <- stopwords("en")
-corpus <- tm_map(corpus, content_transformer(function(x) removeWords(x, stop_words)))  # Remove stop words
-corpus <- tm_map(corpus, content_transformer(tolower)) # Lowercase
-corpus <- tm_map(corpus, removeNumbers)                # Remove numbers
-corpus <- tm_map(corpus, removePunctuation)            # Remove punctuation
-corpus <- tm_map(corpus, stripWhitespace)              # Remove extra whitespace
-```
+# Create corpus and tokens
+corpus <- corpus(tweet_data$Text)
+tokens <- tokens(corpus, remove_punct = TRUE, remove_symbols = TRUE)
+tokens <- tokens_tolower(tokens)
+tokens <- tokens_remove(tokens, stopwords("en"))
 
-Explore corpus
-```{r}
-tdm <- TermDocumentMatrix(corpus)
-tdm_matrix <- as.matrix(tdm)
-word_freq <- rowSums(tdm_matrix)
-word_freq <- sort(word_freq, decreasing = TRUE)
+# Create document-feature matrix (DFM)
+dfm <- dfm(tokens)
+word_freq <- data.frame(topfeatures(dfm, 1000))
 
-# Wordcloud
-#wordcloud(names(word_freq), word_freq, max.words = 100)
+clean_text <- sapply(tokens, function(x) paste(x, collapse = " "))
+tweet_data$CleanText <- clean_text
 ```
 
 Sentiment Analysis
 ```{r}
 # Give a score to each tweet
-tweet_data$Sentiment <- get_sentiment(tweet_data$Text, method = "afinn")
+tweet_data$Sentiment <- get_sentiment(tweet_data$CleanText, method = "afinn")
 
 # Get sentiment score and tweet volume
 df <- tweet_data %>%
@@ -125,7 +123,7 @@ cor_data <- merged_data %>%
 # Compute correlation matrix
 cor_matrix <- cor(cor_data)
 
-write.csv(x = merged_data, file = "Data/merged_data.csv")
+#write.csv(x = merged_data, file = "Data/merged_data.csv")
 
 ```
 
@@ -134,14 +132,12 @@ Visualization
 # Plots 
 # Lagged Mean sentiment and Return
 ggplot(data = na.omit(merged_data), aes(x = Date)) +
-  geom_line(aes(y = LaggedSentiment)) +
-  geom_line(aes(y = AReturn))
+  geom_line(aes(y = LaggedSentiment, color = "Lagged Mean Sentiment")) +
+  geom_line(aes(y = AReturn, color = "Return")) +
+  labs(title = "Lagged Sentiment & Return", x = "Date", y = "") +
+  scale_color_manual(values = c("Return" = "darkblue", "Lagged Mean Sentiment" = "darkred"), name = "")
 
-# Tweet Volume and Trading volume
-ggplot(data = na.omit(merged_data), aes(x = Date)) +
-  geom_line(aes(y = TweetVolume)) +
-  geom_line(aes(y = NVDA.Volume))
-
+ 
 # Visualize correlations
 ggcorrplot(cor_matrix, 
            method = "circle", 
@@ -150,7 +146,6 @@ ggcorrplot(cor_matrix,
            tl.cex = 10,
            colors = c("darkred", "white", "darkblue"),
            title = "Correlation Matrix of Sentiment, Volume & Returns")
-
 
 # Linear models
 # Return and lagged mean sentiment
@@ -162,5 +157,24 @@ plot(lm_model)
 lm_model_volume <- lm(formula = NVDA.Volume ~ TweetVolume, data = merged_data)
 summary(lm_model_volume)
 plot(lm_model_volume)
+
+```
+
+
+===== Exploratory Analysis =====
+```{r}
+
+```
+
+
+===== SVM =====
+```{r}
+
+```
+
+
+
+===== Shiny App =====
+```{r}
 
 ```
