@@ -6,10 +6,10 @@ output: html_document
 ---
 ====Libraries====
 ```{r}
-library(GGally) (exploratory analysis)
-library(zoo) (exploratory analysis)
-library(lubridate) (exploratory analysis)
-library(forecast) (exploratory analysis)
+library(GGally) # Exploratory Analysis
+library(zoo) # Exploratory Analysis
+library(lubridate) # Exploratory Analysis
+library(forecast) # Exploratory Analysis
 ```
 
 ===== Exploratory Analysis =====
