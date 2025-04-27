@@ -152,8 +152,8 @@ best_pred <- predict(best_model, test[, features])
 best_conf_mat <- confusionMatrix(best_pred, as.factor(test$Direction))
 print(best_conf_mat)
 
-## The radial kernal model is used when one wants to project into a larger dimensional space, allowing for
-## analysis that stems beyond the finite range of the original dataset and attempts to draw future conclusions
+## The radial kernel model is used when one wants to project into a larger dimensional space, allowing for
+## analysis that stems beyond the finite range of the original data set and attempts to draw future conclusions
 ## from present data.
 
 ## As is the Linear model, the Radial model can be summarized into the same four attributes, with the data being as follows:
@@ -162,8 +162,8 @@ print(best_conf_mat)
 # Specificity (Up) : 1.00
 # Balanced Accuracy : 0.50
 
-## Unfortunately for this model, the Accurary equals the no-information rate (56%), meaning that the model is simply predicting the majority class (Up) each time.
-## The model never correctly predicts Down (Senitivity = 0), but can predict Up 100% of the time (Specificity = 1.0); however, the model never chooses the Down label at all.
+## Unfortunately for this model, the Accuracy equals the no-information rate (56%), meaning that the model is simply predicting the majority class (Up) each time.
+## The model never correctly predicts Down (Sensitivity = 0), but can predict Up 100% of the time (Specificity = 1.0); however, the model never chooses the Down label at all.
 
 ### What can be gathered from this preliminary analysis?
 ## As the tweet sentiments never have a Negative day, it is impossible for the model to correctly predict how NVDA stocks may trend, even if the stocks can be turbulent in some periods;
