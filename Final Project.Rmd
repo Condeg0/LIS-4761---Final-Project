@@ -21,6 +21,10 @@ library(ggcorrplot)  # Visualizatoin
 library(quanteda)  # Text processing (more efficient)
 library(e1071)  # SVM
 library(caret)  # SVM
+library(GGally) #(exploratory analysis)
+library(zoo) #(exploratory analysis)
+library(lubridate) #(exploratory analysis)
+library(forecast) #(exploratory analysis)
 ```
 
 
