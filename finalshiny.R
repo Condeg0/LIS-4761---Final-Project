@@ -2,7 +2,7 @@ library(shiny)
 library(tidyverse)
 
 # Load the cleaned merged data
-merged_data <- read_csv("merged_data_final.csv")
+merged_data <- na.omit(merged_data)
 
 # Convert Date column properly
 merged_data$Date <- as.Date(merged_data$Date)
@@ -32,7 +32,6 @@ ui <- fluidPage(
     )
   )
 )
-
 # Define Server
 server <- function(input, output) {
   
@@ -40,21 +39,37 @@ server <- function(input, output) {
     data <- merged_data %>%
       filter(Date >= input$date_range[1], Date <= input$date_range[2])
     
-    if (input$sentiment_type == "Positive") {
-      data <- data %>% filter(avg_sentiment > 0)
-    } else if (input$sentiment_type == "Negative") {
-      data <- data %>% filter(avg_sentiment < 0)
-    }
-    
+    # No need to filter by sentiment sign anymore
     data
   })
   
+  selected_sentiment <- reactive({
+    if (input$sentiment_type == "Positive") {
+      return("Positive")
+    } else if (input$sentiment_type == "Negative") {
+      return("Negative")
+    } else {
+      return("MeanSentiment")  # Default
+    }
+  })
+  
+  # Scaling function to properly display everything
+  scaling_factor <- reactive({
+    if (input$sentiment_type == "Positive") {
+      return(1/100)
+    } else if (input$sentiment_type == "Negative") {
+      return(1/10)
+    } else {
+      return(10)  # No scaling for MeanSentiment
+    }
+  })
+  
   output$sentimentPlot <- renderPlot({
-    ggplot(filtered_data(), aes(x = Date, y = avg_sentiment)) +
+    ggplot(filtered_data(), aes(x = Date, y = .data[[selected_sentiment()]])) +
       geom_line(color = "darkgreen") +
-      labs(title = "Average Sentiment Over Time",
+      labs(title = "Sentiment Over Time",
            x = "Date",
-           y = "Average Sentiment Score")
+           y = "Sentiment Score")
   })
   
   output$stockPlot <- renderPlot({
@@ -68,7 +83,7 @@ server <- function(input, output) {
   output$combinedPlot <- renderPlot({
     ggplot(filtered_data(), aes(x = Date)) +
       geom_line(aes(y = NVDA.Close), color = "blue") +
-      geom_line(aes(y = avg_sentiment * 10), color = "red") +
+      geom_line(aes(y = .data[[selected_sentiment()]] * scaling_factor()), color = "red") +
       labs(title = "NVDA Stock Prices and Scaled Sentiment",
            x = "Date",
            y = "Value",
