@@ -1,0 +1,390 @@
+---
+title: "Final Project Deliverable"
+author: "Anthony Nance, Rafael Condé Gomes, Matthew Humphreys, Travis Race, James Angeles"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+
+# Load libraries
+```{r setup, include=FALSE}
+library(quantmod)  # For stock data
+library(dplyr)  # For data & text processing/ cleaning
+library(lubridate)  # For dates
+library(tm)  # Text processing
+library(slam)
+library(wordcloud)  # Visualization
+library(syuzhet)
+library(ggplot2)  # Visualization
+library(lmtest)  # Statistical tests
+library(ggcorrplot)  # Visualizatoin
+library(quanteda)  # Text processing (more efficient)
+library(e1071)  # SVM
+library(caret)  # SVM
+library(shiny)  # For shiny apps
+library(GGally) # Exploratory Analysis
+library(forecast) # Exploratory Analysis
+library(zoo) # Exploratory Analysis
+```
+
+
+# Load & Read Data
+```{r}
+# Get tweet data 
+tweet_data <- read.csv("Data/Nvidia-Tweets.csv")
+tweet_data <- na.omit(tweet_data)  # Remove NA values
+
+# Remove duplicate tweets based on text
+tweet_data <- tweet_data %>%
+  distinct(Text, .keep_all = TRUE)
+
+# Format date column
+tweet_data$Day <- as.Date(tweet_data$Datetime)
+tweet_data$Time <- format(as.POSIXct(tweet_data$Datetime), "%H:%M:%S")
+tweet_data$Hour <- hour(ymd_hms(tweet_data$Datetime))
+
+
+# Get stock price data 
+start <- min(tweet_data$Day)
+end <- max(tweet_data$Day)
+nvda_data <- getSymbols("NVDA", from = start, to = end, auto.assign = F)
+
+nvda_data$LogReturn <- dailyReturn(nvda_data, type = "log")
+nvda_data$AReturn <- dailyReturn(nvda_data, type = "arithmetic")
+nvda_data <- as.data.frame(nvda_data)
+nvda_data$Date <- as.Date(rownames(nvda_data))
+
+```
+
+
+
+# Text Analysis/ Mining
+
+## Text processing & text mining
+```{r}
+# Remove unecessary columns from tweet data
+tweet_data <- tweet_data[ , c("Text", "Day")]
+
+# Create corpus and tokens
+corpus <- corpus(tweet_data$Text)
+tokens <- tokens(corpus, remove_punct = TRUE, remove_symbols = TRUE)
+tokens <- tokens_tolower(tokens)
+tokens <- tokens_remove(tokens, stopwords("en"))
+
+# Create document-feature matrix (DFM)
+# For performance's sake
+dfm <- dfm(tokens)
+word_freq <- data.frame(topfeatures(dfm, 1000))
+
+clean_text <- sapply(tokens, function(x) paste(x, collapse = " "))
+tweet_data$CleanText <- clean_text
+```
+
+## Sentiment Analysis
+```{r}
+# Give a score to each tweet
+tweet_data$Sentiment <- get_sentiment(tweet_data$CleanText, method = "afinn")
+
+# Get sentiment score and tweet volume
+df <- tweet_data %>%
+  mutate(SentimentType = case_when(
+    Sentiment > 0 ~ "positive",
+    Sentiment < 0 ~ "negative",
+    TRUE ~ "neutral"
+  )) %>%
+  group_by(Day) %>%
+  summarize(
+    MeanSentiment = mean(Sentiment),
+    Sentiment = sum(Sentiment),
+    TweetVolume = n(),
+    Positive = sum(SentimentType == "positive"),
+    Negative = sum(SentimentType == "negative"),
+    Neutral = sum(SentimentType == "neutral"),
+    NegPosRatio = ifelse(Positive > 0, Negative / Positive, NA),
+    PosRatio = ifelse(Positive > 0, Positive / TweetVolume, NA),
+    NegRatio = ifelse(Negative > 0, Negative / TweetVolume, NA)) 
+
+
+# Create target variable: direction of next-day closing price
+# For SVM analysis
+nvda_data <- nvda_data %>%
+  mutate(Close_lead = lead(NVDA.Close),
+         Direction = if_else(Close_lead > NVDA.Close, "Up", "Down")) %>%
+  na.omit()
+
+
+# Merge text mining data and stock data
+merged_data <- merge(x = nvda_data, y = df, by.x = "Date", by.y = "Day", all.y = T)
+
+merged_data <- merged_data %>%
+  mutate(
+    LaggedSentiment = lag(MeanSentiment, 1),
+    Volatility = abs(AReturn),  # absolute return as proxy
+    LaggedAReturn = lag(AReturn, 1),
+    LaggedVolatility = lag(Volatility, 1),
+    LaggedNVDA_Volume = lag(NVDA.Volume, 1),
+    LaggedTVolume = lag(TweetVolume, 1)
+  )
+
+# Select only numeric columns you care about
+cor_data <- merged_data %>%
+  select(
+    AReturn, Volatility, MeanSentiment, LaggedSentiment, TweetVolume,
+    LaggedTVolume, NVDA.Volume, LaggedNVDA_Volume, LaggedAReturn,
+    LaggedVolatility) %>%
+  na.omit()
+
+# Write file combined data set into a file for furhter analysis
+write.csv(x = na.omit(merged_data), file = "Data/merged_data.csv")
+
+```
+
+
+# Data Visualization & Exploratory Analysis
+```{r}
+# Histogram of Mean Sentiment
+ggplot(merged_data, aes(x = MeanSentiment)) +
+  geom_histogram(
+    binwidth = 0.2,
+    color = 'black',
+    fill = 'lightblue',
+    boundary = 0
+  ) +
+  labs(
+    title = "Distribution of Daily Mean Sentiment",
+    x = "Mean Sentiment Score",
+    y = "Number of Days"
+  ) +
+  theme_minimal()
+
+
+# Histogram of Daily Returns
+ggplot(merged_data, aes(x = AReturn)) +
+  geom_histogram(
+    binwidth = 0.005,
+    color = 'black',
+    fill = 'lavender',
+  ) +
+  labs(
+    title = "Distribution of Daily Arithmetic Returns",
+    x = "Daily Returns",
+    y = "Number of Days"
+  ) +
+  theme_minimal()
+
+# Partial Autocorrelation Plot
+ggPacf(
+  merged_data$AReturn,
+  lag.max = 20,
+) +
+  labs(
+    title = "Partial Autocorrelation of Returns",
+    x = "Lag (days)",
+    y = "PACF"
+  )
+
+
+# Test Pairwise Correlations
+# Tweets vs NVDA volumes
+g_volumes <- cor(cor_data$TweetVolume, cor_data$NVDA.Volume)
+print(cor.test(cor_data$TweetVolume, cor_data$NVDA.Volume))
+
+#Mean Sentiment vs AReturn
+g_sent_ret <- cor(cor_data$MeanSentiment, cor_data$AReturn)
+print(cor.test(cor_data$MeanSentiment, cor_data$AReturn))
+
+
+# Scatterplot Matrix
+#Build a view of all the relationships between the numerical inputs
+GGally::ggpairs(cor_data,
+                title = "Scatterplot Matrix of Returns, Sentiment, Volume, etc.")
+
+
+# Rolling Correlation
+# Create zoo object
+z <- zoo(
+  cor_data[, c("MeanSentiment","AReturn")],
+  order.by = merged_data$Date[ match( rownames(cor_data), rownames(merged_data) ) ]
+)
+
+# Create a 20 day pearson correlation coefficient
+roll_g <- rollapply(z, width = 20,
+                    FUN = function(x) cor(x[,1], x[,2]),
+                    by.column = FALSE, align = "right", fill = NA)
+
+# Compute the total amount of points
+len <- length(roll_g)
+
+# Choose 6 indeces
+pos <- floor(seq(1, len, length.out = 6))
+
+# Cross Correlation Function
+# Use Cross Correlation Function to discover if sentiment leads returns
+ccf(cor_data$MeanSentiment, cor_data$AReturn,
+    lag.max = 5, main = "Cross-correlation: Sentiment vs Return (±5 days)")
+
+# By Day of The Week
+# Show the days of week for dates
+merged_data$Wday <- wday(merged_data$Date, label=TRUE)
+
+# Plot a boxplot of sentiment by weekdays
+ggplot(merged_data, aes(x = Wday, y = MeanSentiment)) +
+  geom_boxplot() +
+  labs(title="Mean Sentiment by Weekday",
+       y="Mean Sentiment")
+
+# Plot a boxplot of returns by weekdays
+ggplot(merged_data, aes(x = Wday, y = AReturn)) +
+  geom_boxplot() +
+  labs(title="AReturn by Weekday",
+       y="Daily Return")
+
+# Compute correlation matrix
+cor_matrix <- cor(cor_data)
+
+# Visualize correlations
+ggcorrplot(cor_matrix, 
+           method = "circle", 
+           type = "lower", 
+           lab = TRUE, 
+           tl.cex = 10,
+           colors = c("darkred", "white", "darkblue"),
+           title = "Correlation Matrix of Sentiment, Volume & Returns")
+```
+
+
+# SVM 
+```{r}
+svm_merged_data <- na.omit(merged_data)
+
+set.seed(123)
+train_index <- createDataPartition(svm_merged_data$Direction, p = 0.8, list = FALSE)
+train <- svm_merged_data[train_index, ]
+test  <- svm_merged_data[-train_index, ]
+
+features <- c("NVDA.Open", "NVDA.High", "NVDA.Low", "NVDA.Close", "NVDA.Volume", "NVDA.Adjusted", "PosRatio", "NegRatio", "MeanSentiment")
+
+svm_model <- svm(
+  as.factor(Direction) ~ ., 
+  data = train[, c(features, "Direction")],
+  kernel = "linear",
+  cost = 1,
+  probability = TRUE
+)
+
+pred <- predict(svm_model, test[, features])
+conf_mat <- confusionMatrix(pred, as.factor(test$Direction))
+print(conf_mat)
+
+tune_out <- tune(
+  svm, as.factor(Direction) ~ ., data = train[, c(features, "Direction")],
+  ranges = list(cost = c(0.1, 1, 10), gamma = c(0.01, 0.1, 1)),
+  kernel = "radial"
+)
+
+best_model <- tune_out$best.model
+
+best_pred <- predict(best_model, test[, features])
+best_conf_mat <- confusionMatrix(best_pred, as.factor(test$Direction))
+print(best_conf_mat)
+```
+
+
+
+
+# Shiny App 
+```{r}
+# Load the cleaned merged data
+merged_data <- na.omit(merged_data)
+
+# Convert Date column properly
+merged_data$Date <- as.Date(merged_data$Date)
+
+# Define UI
+ui <- fluidPage(
+  titlePanel("Nvidia (NVDA) Stock and Sentiment Explorer"),
+  
+  sidebarLayout(
+    sidebarPanel(
+      dateRangeInput("date_range", 
+                     "Select Date Range:", 
+                     start = min(merged_data$Date), 
+                     end = max(merged_data$Date)),
+      selectInput("sentiment_type", 
+                  "Select Sentiment Type:",
+                  choices = c("All", "Positive", "Negative"),
+                  selected = "All")
+    ),
+    
+    mainPanel(
+      tabsetPanel(
+        tabPanel("Sentiment Over Time", plotOutput("sentimentPlot")),
+        tabPanel("Stock Price Over Time", plotOutput("stockPlot")),
+        tabPanel("Combined View", plotOutput("combinedPlot"))
+      )
+    )
+  )
+)
+# Define Server
+server <- function(input, output) {
+  
+  filtered_data <- reactive({
+    data <- merged_data %>%
+      filter(Date >= input$date_range[1], Date <= input$date_range[2])
+    
+    # No need to filter by sentiment sign anymore
+    data
+  })
+  
+  selected_sentiment <- reactive({
+    if (input$sentiment_type == "Positive") {
+      return("Positive")
+    } else if (input$sentiment_type == "Negative") {
+      return("Negative")
+    } else {
+      return("MeanSentiment")  # Default
+    }
+  })
+  
+  # Scaling function to properly display everything
+  scaling_factor <- reactive({
+    if (input$sentiment_type == "Positive") {
+      return(1/100)
+    } else if (input$sentiment_type == "Negative") {
+      return(1/10)
+    } else {
+      return(10)  # No scaling for MeanSentiment
+    }
+  })
+  
+  output$sentimentPlot <- renderPlot({
+    ggplot(filtered_data(), aes(x = Date, y = .data[[selected_sentiment()]])) +
+      geom_line(color = "darkgreen") +
+      labs(title = "Sentiment Over Time",
+           x = "Date",
+           y = "Sentiment Score")
+  })
+  
+  output$stockPlot <- renderPlot({
+    ggplot(filtered_data(), aes(x = Date, y = NVDA.Close)) +
+      geom_line(color = "steelblue") +
+      labs(title = "Nvidia (NVDA) Closing Stock Prices",
+           x = "Date",
+           y = "Closing Price (USD)")
+  })
+  
+  output$combinedPlot <- renderPlot({
+    ggplot(filtered_data(), aes(x = Date)) +
+      geom_line(aes(y = NVDA.Close), color = "blue") +
+      geom_line(aes(y = .data[[selected_sentiment()]] * scaling_factor()), color = "red") +
+      labs(title = "NVDA Stock Prices and Scaled Sentiment",
+           x = "Date",
+           y = "Value",
+           caption = "Blue = Stock Price, Red = Scaled Sentiment")
+  })
+}
+
+# Run the App
+shinyApp(ui = ui, server = server)
+```
+
